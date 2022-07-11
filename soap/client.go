@@ -10,6 +10,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"reflect"
+	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/net/html/charset"
 )
@@ -49,6 +51,7 @@ type Client struct {
 	UserAgent              string               // User-Agent header will be added to each request
 	Namespace              string               // SOAP Namespace
 	URNamespace            string               // Uniform Resource Namespace
+	URN1amespace           string               // Uniform Resource Namespace
 	ThisNamespace          string               // SOAP This-Namespace (tns)
 	ExcludeActionNamespace bool                 // Include Namespace to SOAP Action header
 	Envelope               string               // Optional SOAP Envelope
@@ -101,6 +104,7 @@ func doRoundTrip(c *Client, setHeaders func(*http.Request), in, out Message) err
 	req := &Envelope{
 		EnvelopeAttr: c.Envelope,
 		URNAttr:      c.URNamespace,
+		URN1Attr:     c.URN1amespace,
 		NSAttr:       c.Namespace,
 		TNSAttr:      c.ThisNamespace,
 		XSIAttr:      XSINamespace,
@@ -126,6 +130,7 @@ func doRoundTrip(c *Client, setHeaders func(*http.Request), in, out Message) err
 	if cli == nil {
 		cli = http.DefaultClient
 	}
+	//fmt.Println(&b)
 	r, err := http.NewRequest("POST", c.URL, &b)
 	if err != nil {
 		return err
@@ -157,15 +162,42 @@ func doRoundTrip(c *Client, setHeaders func(*http.Request), in, out Message) err
 			Msg:        string(body),
 		}
 	}
+	// if resp.StatusCode == http.StatusOK {
+	// 	bodyBytes, err := io.ReadAll(resp.Body)
+	// 	if err != nil {
+	// 		fmt.Println(err)
+	// 	}
+	// 	bodyString := string(bodyBytes)
+	// 	fmt.Println(bodyString)
+	// }
 
 	marshalStructure := struct {
 		XMLName xml.Name `xml:"Envelope"`
 		Body    Message
 	}{Body: out}
 
-	decoder := xml.NewDecoder(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	decoder := xml.NewDecoder(strings.NewReader(string(c.RemoveNonUTF8Bytes(bodyBytes))))
 	decoder.CharsetReader = charset.NewReaderLabel
 	return decoder.Decode(&marshalStructure)
+}
+
+// from: https://stackoverflow.com/questions/40096958/golang-xml-ending-parsing-with-invalid-utf-8-error
+var removeNonUTF = func(r rune) rune {
+	if r == utf8.RuneError {
+		return -1
+	}
+	return r
+}
+
+// RemoveNonUTF8Bytes removes bytes that isn't UTF-8 encoded
+// from: https://stackoverflow.com/questions/40096958/golang-xml-ending-parsing-with-invalid-utf-8-error
+func (c *Client) RemoveNonUTF8Bytes(data []byte) []byte {
+	return bytes.Map(removeNonUTF, data)
 }
 
 // RoundTrip implements the RoundTripper interface.
@@ -246,6 +278,7 @@ type Envelope struct {
 	NSAttr       string   `xml:"xmlns:ns,attr"`
 	TNSAttr      string   `xml:"xmlns:tns,attr,omitempty"`
 	URNAttr      string   `xml:"xmlns:urn,attr,omitempty"`
+	URN1Attr     string   `xml:"xmlns:urn1,attr,omitempty"`
 	XSIAttr      string   `xml:"xmlns:xsi,attr,omitempty"`
 	Header       Message  `xml:"SOAP-ENV:Header"`
 	Body         Message  `xml:"SOAP-ENV:Body"`
